@@ -257,7 +257,7 @@ async function processResumeText(text) {
       analysisResult.hashtags = generateHashtags(analysisResult.personalityLabel);
       return NextResponse.json(analysisResult);
     } catch (directParseError) {
-      console.log('Direct JSON parsing failed, trying to extract JSON');
+      console.log('Direct JSON parsing failed, trying to extract JSON', directParseError);
 
       // If direct parsing fails, try to extract JSON from the response
       const jsonRegex = /{[\s\S]*}/;
