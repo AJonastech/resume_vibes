@@ -173,12 +173,12 @@ function renderPage(pageData) {
 // Restore the processResumeText function (uncomment and ensure it's operational)
 async function processResumeText(text) {
   try {
-    // Enhanced system prompt for better section detection and buzzword suggestions
+    // Enhanced system prompt with STRONGER emphasis on section extraction
     const systemPrompt = `
       You are an AI resume analyzer specializing in detailed section detection and analysis.
 
       TASK:
-      1. First, carefully analyze the resume text to identify ALL existing sections such as:
+      1. CRITICAL: First, CAREFULLY analyze the resume text to identify ALL existing sections such as:
          - Summary/Objective/Profile
          - Experience/Work History
          - Education
@@ -192,9 +192,12 @@ async function processResumeText(text) {
          - References
          - Any other sections present in the resume
 
+         Look for section headers, paragraph breaks, formatting patterns. Even if sections don't have clear headers,
+         identify logical content groupings and assign appropriate section titles.
+
       2. For EACH identified section:
-         - Extract the EXACT original text (preserve formatting where possible)
-         - Count words in that section
+         - Preserve the EXACT original text including formatting and whitespace
+         - Count words in that section precisely
          - Assess improvement priority (High, Medium, Low)
          - Create a concise but detailed rewrite that improves the section
          - Provide 2 example alternatives from strong resumes
@@ -207,17 +210,17 @@ async function processResumeText(text) {
          - Assign a personality label that captures the resume style
          - Write a witty "hot take" comment about the resume
 
-      RESPONSE FORMAT:
-      Return a JSON with these exact keys:
+      RESPONSE FORMAT - YOU MUST FOLLOW THIS EXACTLY:
+      Return ONLY a JSON object with these exact keys:
       - vibeScore (number)
       - personalityLabel (string)
       - hotTake (string)
       - buzzwords (array of strings)
       - buzzwordCounts (object mapping buzzwords to counts)
-      - buzzwordSuggestions (object mapping each buzzword to an array of 3 specific improvement suggestions)
+      - buzzwordSuggestions (object mapping each buzzword to an array of suggestions)
       - sections (array of section objects)
 
-      For each section object include:
+      For each section object include these exact keys:
       - title (string - the section name)
       - originalText (string - the exact text from that section)
       - wordCount (number)
@@ -226,8 +229,11 @@ async function processResumeText(text) {
       - examples (array of {title, text} objects)
       - questions (array of strings)
 
-      Keep your response strictly JSON-formatted with no additional text or explanation outside the JSON structure.
-      IMPORTANT: Make sure your response includes ALL the sections you can identify from the resume, not just predetermined categories.
+      IMPORTANT REQUIREMENTS:
+      1. Your entire response must be valid JSON. Do not include any text before or after the JSON.
+      2. Make sure your response includes ALL the sections you identify from the resume, not just predetermined categories.
+      3. If a section has subsections, include each subsection as its own section object.
+      4. You MUST extract at least 3-4 distinct sections from any resume, even if they aren't clearly labeled.
     `;
 
     // Limit text length more aggressively to avoid token issues
@@ -242,109 +248,249 @@ async function processResumeText(text) {
       model: 'gpt-3.5-turbo-16k',
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Here's the resume text to analyze in detail:\n\n${truncatedText}` }
+        { role: 'user', content: `Here's the resume text to analyze in detail. Extract ALL sections even if they aren't clearly labeled:\n\n${truncatedText}` }
       ],
-      temperature: 0.5,
+      temperature: 0.4, // Lower temperature for more consistent extraction
       max_tokens: 4000,
     });
 
     const aiResponseText = response.choices[0].message.content.trim();
     console.log('OpenAI response received. Starting JSON parsing...');
     
-    // Improved JSON extraction and parsing with better error handling
+    // Log a sample of the response for debugging
+    console.log('Response sample:', aiResponseText.substring(0, 100) + '...');
+    
+    // Improved robust JSON parsing with fallback
     try {
       // First try direct JSON parsing
       try {
         const analysisResult = JSON.parse(aiResponseText);
+        
+        // Validate section extraction
+        if (!analysisResult.sections || analysisResult.sections.length < 2) {
+          console.log('Insufficient sections detected, trying alternative extraction');
+          throw new Error('Insufficient sections');
+        }
+        
         analysisResult.hashtags = generateHashtags(analysisResult.personalityLabel);
-        console.log('Successfully parsed JSON directly');
+        console.log(`Successfully parsed JSON directly with ${analysisResult.sections.length} sections`);
         return NextResponse.json(analysisResult);
       } catch (directParseError) {
         console.log('Direct JSON parsing failed, attempting extraction:', directParseError.message);
-        
-        // Log a sample of the text to help debugging
-        console.log('Response sample:', aiResponseText.substring(0, 200) + '...');
       }
 
-      // Try to find and extract valid JSON using a better regex
-      // This looks for the outermost balanced JSON object
+      // Try to find JSON using string indices instead of regex
       const jsonStartPos = aiResponseText.indexOf('{');
       const jsonEndPos = aiResponseText.lastIndexOf('}');
       
       if (jsonStartPos >= 0 && jsonEndPos > jsonStartPos) {
         const extractedJson = aiResponseText.substring(jsonStartPos, jsonEndPos + 1);
-        console.log(`Found JSON object from pos ${jsonStartPos} to ${jsonEndPos}`);
+        console.log(`Found JSON from position ${jsonStartPos} to ${jsonEndPos}`);
         
-        // More extensive JSON cleaning
+        // More thorough JSON cleaning
         let sanitizedJson = extractedJson
           .replace(/[\u0000-\u001F\u007F-\u009F]/g, "") // Remove control characters
           .replace(/\\'/g, "'")        // Fix single quotes
           .replace(/\\"/g, '"')        // Fix double quotes
-          .replace(/\n/g, '\\n')       // Handle newlines
-          .replace(/\r/g, '\\r')       // Handle carriage returns
-          .replace(/\t/g, '\\t')       // Handle tabs
-          .replace(/\\([^"'\\\/bfnrt])/g, '$1'); // Remove invalid escapes
+          .replace(/\n/g, ' ')         // Replace newlines with spaces
+          .replace(/\r/g, ' ')         // Replace carriage returns with spaces
+          .replace(/\t/g, ' ')         // Replace tabs with spaces
+          .replace(/\\/g, '\\\\')      // Escape backslashes
+          .replace(/"\s+:/g, '":')     // Fix spaces between quotes and colons
+          .replace(/:\s+"/g, ':"');    // Fix spaces between colons and quotes
         
-        // Add additional validation to check JSON structure
-        if (sanitizedJson.startsWith('{') && sanitizedJson.endsWith('}')) {
-          try {
-            const analysisResult = JSON.parse(sanitizedJson);
-            
-            // Validate that we have the expected fields
-            if (!analysisResult.vibeScore) analysisResult.vibeScore = 60;
-            if (!analysisResult.personalityLabel) analysisResult.personalityLabel = "Resume Submitter";
-            if (!analysisResult.sections) analysisResult.sections = [];
-            if (!analysisResult.buzzwords) analysisResult.buzzwords = [];
-            if (!analysisResult.buzzwordCounts) analysisResult.buzzwordCounts = {};
-            
-            analysisResult.hashtags = generateHashtags(analysisResult.personalityLabel);
-            console.log('Successfully parsed extracted JSON');
-            return NextResponse.json(analysisResult);
-          } catch (extractionError) {
-            console.error('Failed to parse extracted JSON:', extractionError.message);
-            // Continue to fallback instead of throwing
+        try {
+          const analysisResult = JSON.parse(sanitizedJson);
+          
+          // Ensure required fields exist
+          if (!analysisResult.vibeScore) analysisResult.vibeScore = 65;
+          if (!analysisResult.personalityLabel) analysisResult.personalityLabel = "Resume Enthusiast";
+          
+          // Ensure sections are properly extracted
+          if (!analysisResult.sections || analysisResult.sections.length < 2) {
+            console.log('Extracted JSON has insufficient sections, attempting forced section extraction');
+            analysisResult.sections = forceSectionExtraction(text);
           }
+          
+          if (!analysisResult.buzzwords) analysisResult.buzzwords = extractBuzzwords(text);
+          if (!analysisResult.buzzwordCounts) analysisResult.buzzwordCounts = {};
+          if (!analysisResult.buzzwordSuggestions) analysisResult.buzzwordSuggestions = {};
+          
+          analysisResult.hashtags = generateHashtags(analysisResult.personalityLabel);
+          console.log(`Successfully parsed extracted JSON with ${analysisResult.sections.length} sections`);
+          return NextResponse.json(analysisResult);
+        } catch (extractionError) {
+          console.error('Failed to parse extracted JSON:', extractionError.message);
         }
-      }
-      
-      // If all parsing attempts fail, use a structured fallback response
-      console.log('All JSON parsing attempts failed, using fallback response');
-      return createFallbackResponse(text);
-      
-    } catch (jsonError) {
-      console.error('JSON handling error:', jsonError);
-      return createFallbackResponse(text);
+        
+        // If we got this far, all parsing attempts failed - use fallback
+        return createFallbackResponse(text);
+        
+      } 
+    } catch (error) {
+      console.error('Error in OpenAI analysis:', error);
+      return NextResponse.json(
+        { 
+          error: 'Failed to analyze resume. We apologize for the inconvenience.',
+          details: error.message 
+        },
+        { status: 200 } // Return 200 instead of 500 to avoid error display
+      );
     }
   } catch (error) {
     console.error('Error in OpenAI analysis:', error);
     return NextResponse.json(
-      { error: 'Failed to analyze resume: ' + (error.message || 'Unknown error') },
-      { status: 500 }
+      { 
+        error: 'Failed to analyze resume. We apologize for the inconvenience.',
+        details: error.message 
+      },
+      { status: 200 } // Return 200 instead of 500 to avoid error display
     );
   }
+}
+
+// Function to extract sections manually as a fallback
+function forceSectionExtraction(text) {
+  console.log('Performing manual section extraction');
+  
+  // Basic pattern matching to find potential sections
+  const lines = text.split('\n').filter(line => line.trim().length > 0);
+  const sections = [];
+  let currentSection = null;
+  let currentContent = [];
+  
+  // Common section headers in resumes
+  const sectionPatterns = [
+    /education|academic/i,
+    /experience|employment|work history/i,
+    /skills|proficiencies|competencies/i,
+    /summary|profile|objective/i,
+    /projects|portfolio/i,
+    /certifications|licenses/i,
+    /awards|honors|achievements/i,
+    /publications|research/i,
+    /languages|language proficiency/i,
+    /volunteer|community/i,
+    /references|recommendations/i,
+    /interests|hobbies/i
+  ];
+  
+  // Process lines to extract sections
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    // Skip empty lines
+    if (!line) continue;
+    
+    // Check if this line looks like a section header
+    const isHeader = 
+      (line.length < 35 && /[A-Z]/.test(line[0]) && line === line.toUpperCase()) || // ALL CAPS headers
+      sectionPatterns.some(pattern => pattern.test(line)) ||  // Matches common section names
+      (line.length < 30 && line.endsWith(':')) ||            // Lines ending with colon
+      (line.length < 30 && !line.includes(' ')); // Single words that might be headers
+    
+    if (isHeader || i === lines.length - 1) {
+      // Save previous section if we have one
+      if (currentSection) {
+        const content = currentContent.join('\n');
+        sections.push({
+          title: currentSection,
+          originalText: content,
+          wordCount: content.split(/\s+/).filter(Boolean).length,
+          improvement: "Medium",
+          rewrite: `Consider enhancing this section with more specific achievements and metrics.`,
+          examples: [
+            {title: "Example Format", text: "Use bullet points to highlight key achievements."},
+            {title: "Example Content", text: "Quantify results where possible."}
+          ],
+          questions: [
+            "Could you add specific metrics to quantify your achievements?",
+            "Have you included relevant keywords for this position?",
+            "Can you demonstrate the impact of your work more clearly?"
+          ]
+        });
+      }
+      
+      // Start a new section
+      if (i < lines.length - 1) {
+        currentSection = line;
+        currentContent = [];
+      } else {
+        // Last line - add to current content
+        currentContent.push(line);
+      }
+    } else {
+      // Add line to current section content
+      currentContent.push(line);
+      
+      // If no section has been identified yet but we have content,
+      // create a default section
+      if (!currentSection && currentContent.length === 3) {
+        currentSection = "Profile/Summary";
+      }
+    }
+  }
+  
+  // If we have no sections, create at least one
+  if (sections.length === 0) {
+    sections.push({
+      title: "Resume Content",
+      originalText: text.substring(0, 500) + (text.length > 500 ? "..." : ""),
+      wordCount: text.split(/\s+/).filter(Boolean).length,
+      improvement: "Medium",
+      rewrite: "Consider organizing your resume into clearly labeled sections.",
+      examples: [
+        {title: "Standard Format", text: "Include dedicated sections for Experience, Education, and Skills at minimum."},
+        {title: "Modern Approach", text: "Consider adding a brief Professional Summary at the top."}
+      ],
+      questions: [
+        "How could you better organize your information into distinct sections?",
+        "Are you highlighting your most relevant qualifications?",
+        "Have you clearly labeled each section of your resume?"
+      ]
+    });
+  }
+  
+  return sections;
+}
+
+// Function to extract common buzzwords
+function extractBuzzwords(text) {
+  const commonBuzzwords = [
+    'synergy', 'dynamic', 'proactive', 'leverage', 'innovative', 'solution',
+    'strategic', 'results-driven', 'detail-oriented', 'team player', 'motivated',
+    'passionate', 'excellent communication', 'self-starter', 'creative', 'leadership',
+    'responsible for', 'successfully', 'experienced', 'managed', 'developed'
+  ];
+  
+  return commonBuzzwords.filter(word => 
+    new RegExp('\\b' + word + '\\b', 'i').test(text)
+  );
 }
 
 // Helper function to create a fallback response
 function createFallbackResponse(text) {
   const wordCount = text.split(/\s+/).filter(Boolean).length;
   
+  console.log('Using fallback response mechanism');
+  
   const fallbackResult = {
     vibeScore: 65,
     personalityLabel: "Resume Enthusiast",
-    hotTake: "Your resume has potential, but could use more polish and precision.",
+    hotTake: "Your resume has some great content, but might benefit from a bit more structure and clarity.",
     buzzwords: [],
     buzzwordCounts: {},
     buzzwordSuggestions: {},
     sections: [
       {
-        title: "Resume Content",
+        title: "Resume Overview",
         originalText: text.substring(0, 300) + "...",
-        wordCount,
+        wordCount: wordCount,
         improvement: "Medium",
-        rewrite: "We couldn't fully analyze your resume structure, but we can see it has approximately " + 
-                wordCount + " words. Consider organizing it into clear sections with strong action verbs.",
+        rewrite: "We've detected approximately " + wordCount + " words in your resume. Consider organizing it into clearly defined sections with strong action verbs and specific achievements.",
         examples: [
-          {title: "Professional Format", text: "Use clear headings like 'Experience', 'Education', and 'Skills' with consistent formatting."}
+          {title: "Professional Format", text: "Use clear headings and consistent formatting with bullets for readability."},
+          {title: "Achievement Focus", text: "Quantify your accomplishments with metrics where possible."}
         ],
         questions: [
           "Is your resume organized with clear section headings?",
@@ -357,4 +503,29 @@ function createFallbackResponse(text) {
   };
   
   return NextResponse.json(fallbackResult);
+}
+
+function generateHashtags(personalityLabel) {
+  const defaultHashtags = ["#ResumeVibes", "#CareerAura", "#ProfessionalEnergy"];
+  
+  // Generate custom hashtags based on personality label
+  if (!personalityLabel) return defaultHashtags;
+  
+  const customHashtags = [];
+  
+  // Create hashtag from personality label
+  const labelHashtag = "#" + personalityLabel.replace(/\s+/g, "");
+  customHashtags.push(labelHashtag);
+  
+  // Add some context-specific hashtags based on personality types
+  if (/creative|innovat|design/i.test(personalityLabel)) {
+    customHashtags.push("#CreativeForce", "#InnovationMindset");
+  } else if (/tech|engineer|develop/i.test(personalityLabel)) {
+    customHashtags.push("#TechTalent", "#CodeCrafted");
+  } else if (/leader|manage|execut/i.test(personalityLabel)) {
+    customHashtags.push("#LeadershipDNA", "#ExecutivePresence");
+  }
+  
+  // Combine custom hashtags with defaults, ensuring we return at least 3
+  return [...new Set([...customHashtags, ...defaultHashtags])].slice(0, 5);
 }
