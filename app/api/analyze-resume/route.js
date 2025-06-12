@@ -249,41 +249,71 @@ async function processResumeText(text) {
     });
 
     const aiResponseText = response.choices[0].message.content.trim();
-    console.log('OpenAI response received. Parsing JSON...');
+    console.log('OpenAI response received. Starting JSON parsing...');
     
+    // Improved JSON extraction and parsing with better error handling
     try {
-      // First, try direct JSON parsing
-      const analysisResult = JSON.parse(aiResponseText);
-      analysisResult.hashtags = generateHashtags(analysisResult.personalityLabel);
-      return NextResponse.json(analysisResult);
-    } catch (directParseError) {
-      console.log('Direct JSON parsing failed, trying to extract JSON', directParseError);
-
-      // If direct parsing fails, try to extract JSON from the response
-      const jsonRegex = /{[\s\S]*}/;
-      const match = aiResponseText.match(jsonRegex);
-
-      if (match) {
-        try {
-          const extractedJson = match[0];
-          console.log('Found JSON in response, attempting to parse');
-
-          // Make sure the extracted text is valid JSON
-          const sanitizedJson = extractedJson
-            .replace(/\\'/g, "'") // Replace escaped single quotes
-            .replace(/\\"/g, '"') // Replace escaped double quotes
-            .replace(/\n/g, '\\n'); // Escape newlines properly
-
-          const analysisResult = JSON.parse(sanitizedJson);
-          analysisResult.hashtags = generateHashtags(analysisResult.personalityLabel);
-          return NextResponse.json(analysisResult);
-        } catch (extractionError) {
-          console.error('Failed to parse extracted JSON:', extractionError);
-          throw new Error('Could not parse extracted JSON');
-        }
-      } else {
-        throw new Error('No JSON pattern found in response');
+      // First try direct JSON parsing
+      try {
+        const analysisResult = JSON.parse(aiResponseText);
+        analysisResult.hashtags = generateHashtags(analysisResult.personalityLabel);
+        console.log('Successfully parsed JSON directly');
+        return NextResponse.json(analysisResult);
+      } catch (directParseError) {
+        console.log('Direct JSON parsing failed, attempting extraction:', directParseError.message);
+        
+        // Log a sample of the text to help debugging
+        console.log('Response sample:', aiResponseText.substring(0, 200) + '...');
       }
+
+      // Try to find and extract valid JSON using a better regex
+      // This looks for the outermost balanced JSON object
+      const jsonStartPos = aiResponseText.indexOf('{');
+      const jsonEndPos = aiResponseText.lastIndexOf('}');
+      
+      if (jsonStartPos >= 0 && jsonEndPos > jsonStartPos) {
+        const extractedJson = aiResponseText.substring(jsonStartPos, jsonEndPos + 1);
+        console.log(`Found JSON object from pos ${jsonStartPos} to ${jsonEndPos}`);
+        
+        // More extensive JSON cleaning
+        let sanitizedJson = extractedJson
+          .replace(/[\u0000-\u001F\u007F-\u009F]/g, "") // Remove control characters
+          .replace(/\\'/g, "'")        // Fix single quotes
+          .replace(/\\"/g, '"')        // Fix double quotes
+          .replace(/\n/g, '\\n')       // Handle newlines
+          .replace(/\r/g, '\\r')       // Handle carriage returns
+          .replace(/\t/g, '\\t')       // Handle tabs
+          .replace(/\\([^"'\\\/bfnrt])/g, '$1'); // Remove invalid escapes
+        
+        // Add additional validation to check JSON structure
+        if (sanitizedJson.startsWith('{') && sanitizedJson.endsWith('}')) {
+          try {
+            const analysisResult = JSON.parse(sanitizedJson);
+            
+            // Validate that we have the expected fields
+            if (!analysisResult.vibeScore) analysisResult.vibeScore = 60;
+            if (!analysisResult.personalityLabel) analysisResult.personalityLabel = "Resume Submitter";
+            if (!analysisResult.sections) analysisResult.sections = [];
+            if (!analysisResult.buzzwords) analysisResult.buzzwords = [];
+            if (!analysisResult.buzzwordCounts) analysisResult.buzzwordCounts = {};
+            
+            analysisResult.hashtags = generateHashtags(analysisResult.personalityLabel);
+            console.log('Successfully parsed extracted JSON');
+            return NextResponse.json(analysisResult);
+          } catch (extractionError) {
+            console.error('Failed to parse extracted JSON:', extractionError.message);
+            // Continue to fallback instead of throwing
+          }
+        }
+      }
+      
+      // If all parsing attempts fail, use a structured fallback response
+      console.log('All JSON parsing attempts failed, using fallback response');
+      return createFallbackResponse(text);
+      
+    } catch (jsonError) {
+      console.error('JSON handling error:', jsonError);
+      return createFallbackResponse(text);
     }
   } catch (error) {
     console.error('Error in OpenAI analysis:', error);
@@ -294,12 +324,37 @@ async function processResumeText(text) {
   }
 }
 
-function generateHashtags(personalityLabel) {
-  const baseHashtags = ['#ResumeVibes', '#CareerAura'];
-
-  // Generate a custom hashtag based on personality
-  const customHashtag = '#' + personalityLabel.replace(/\s+/g, '')
-    .replace(/[^\w\s]/gi, '') + 'Energy';
-
-  return [...baseHashtags, customHashtag];
+// Helper function to create a fallback response
+function createFallbackResponse(text) {
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  
+  const fallbackResult = {
+    vibeScore: 65,
+    personalityLabel: "Resume Enthusiast",
+    hotTake: "Your resume has potential, but could use more polish and precision.",
+    buzzwords: [],
+    buzzwordCounts: {},
+    buzzwordSuggestions: {},
+    sections: [
+      {
+        title: "Resume Content",
+        originalText: text.substring(0, 300) + "...",
+        wordCount,
+        improvement: "Medium",
+        rewrite: "We couldn't fully analyze your resume structure, but we can see it has approximately " + 
+                wordCount + " words. Consider organizing it into clear sections with strong action verbs.",
+        examples: [
+          {title: "Professional Format", text: "Use clear headings like 'Experience', 'Education', and 'Skills' with consistent formatting."}
+        ],
+        questions: [
+          "Is your resume organized with clear section headings?",
+          "Have you used quantifiable achievements where possible?",
+          "Is your contact information prominently displayed?"
+        ]
+      }
+    ],
+    hashtags: ["#ResumeVibes", "#CareerAura", "#ProfessionalEnergy"]
+  };
+  
+  return NextResponse.json(fallbackResult);
 }
