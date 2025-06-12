@@ -1,0 +1,247 @@
+@import "tailwindcss";
+
+/* ——————————————————————————
+   Theme variables - Tailwind v4 approach
+—————————————————————————— */
+@theme {
+  --color-background-dark: #0D1117;
+  --color-background-light: #F8F9FA;
+  --color-foreground-dark: #F8F9FA;
+  --color-foreground-light: #0D1117;
+  --color-primary: #10B981; /* Changed to green */
+  --color-accent-alert: #059669; /* Changed to darker green */
+  --color-accent-warning: #34D399; /* Changed to lighter green */
+  --color-secondary: #6EE7B7; /* Changed to pale green */
+  --color-positive: #10B981;
+  --color-negative: #EF4444;
+  
+  --gradient-spike: linear-gradient(90deg, #10B981 0%, #059669 100%); /* Green gradient */
+  --gradient-calm: linear-gradient(90deg, #6EE7B7 0%, rgba(110, 231, 183, 0) 100%); /* Light green gradient */
+}
+
+/* ——————————————————————————
+   Base element styles
+—————————————————————————— */
+@layer base {
+  :root {
+    --color-background: var(--color-background-light);
+    --color-foreground: var(--color-foreground-light);
+  }
+  
+  .dark {
+    --color-background: var(--color-background-dark);
+    --color-foreground: var(--color-foreground-dark);
+  }
+  
+  html {
+    @apply antialiased;
+  }
+  
+  body {
+    font-family: var(--font-inter, sans-serif);
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* Grid pattern overlay */
+  body::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: -1;
+    background-image: 
+      linear-gradient(to right, rgba(110, 231, 183, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(110, 231, 183, 0.05) 1px, transparent 1px);
+    background-size: 50px 50px;
+    pointer-events: none;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-satoshi, var(--font-space-grotesk, sans-serif));
+  }
+  
+  code, kbd, samp {
+    font-family: var(--font-ibm-plex-mono, monospace);
+  }
+}
+
+/* ——————————————————————————
+   Reusable typography utilities
+—————————————————————————— */
+@layer components {
+  .headline  { @apply text-5xl; font-family: var(--font-satoshi, var(--font-space-grotesk, sans-serif)); }
+  .subhead   { @apply text-2xl; font-family: var(--font-satoshi, var(--font-space-grotesk, sans-serif)); }
+  .body-text { @apply text-base; font-family: var(--font-inter, sans-serif); }
+  .tag       { @apply text-xs uppercase tracking-wide; font-family: var(--font-inter, sans-serif); }
+  
+  /* Theme color classes */
+  .bg-primary { background-color: var(--color-primary); }
+  .text-primary { color: var(--color-primary); }
+  .border-primary { border-color: var(--color-primary); }
+  
+  .bg-accent-alert { background-color: var(--color-accent-alert); }
+  .text-accent-alert { color: var(--color-accent-alert); }
+  
+  .bg-accent-warning { background-color: var(--color-accent-warning); }
+  .text-accent-warning { color: var(--color-accent-warning); }
+  
+  .bg-secondary { background-color: var(--color-secondary); }
+  .text-secondary { color: var(--color-secondary); }
+  
+  .bg-positive { background-color: var(--color-positive); }
+  .text-positive { color: var(--color-positive); }
+  
+  .bg-negative { background-color: var(--color-negative); }
+  .text-negative { color: var(--color-negative); }
+  
+  .bg-gradient-spike { background-image: var(--gradient-spike); }
+  .bg-gradient-calm { background-image: var(--gradient-calm); }
+}
+
+/* ——————————————————————————
+   Grid animation and glow effect
+—————————————————————————— */
+@keyframes gridPathAnimation {
+  0% {
+    transform: translateX(-100%) translateY(0);
+    opacity: 0.2;
+  }
+  25% {
+    transform: translateX(0%) translateY(0);
+    opacity: 1;
+  }
+  40% {
+    transform: translateX(0%) translateY(100%);
+    opacity: 0.8;
+  }
+  60% {
+    transform: translateX(50%) translateY(100%);
+    opacity: 1;
+  }
+  75% {
+    transform: translateX(100%) translateY(50%);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateX(150%) translateY(-50%);
+    opacity: 0;
+  }
+}
+
+@keyframes gridPathAnimation2 {
+  0% {
+    transform: translateX(100%) translateY(-100%);
+    opacity: 0;
+  }
+  30% {
+    transform: translateX(0%) translateY(0%);
+    opacity: 1;
+  }
+  65% {
+    transform: translateX(-50%) translateY(50%);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateX(-150%) translateY(100%);
+    opacity: 0;
+  }
+}
+
+.grid-animation-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.grid-path {
+  position: absolute;
+  width: 300px;
+  height: 300px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  filter: blur(3px); /* Increased blur for better glow effect */
+  opacity: 0;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4); /* Added glow shadow */
+}
+
+.grid-path-1 {
+  top: 10%;
+  left: -50px;
+  border-top-color: var(--color-primary);
+  border-right-color: var(--color-primary);
+  animation: gridPathAnimation 15s infinite ease-in-out;
+}
+
+.grid-path-2 {
+  top: 40%;
+  right: -50px;
+  border-bottom-color: var(--color-accent-alert);
+  border-left-color: var(--color-accent-alert);
+  animation: gridPathAnimation2 18s infinite ease-in-out;
+}
+
+.grid-path-3 {
+  bottom: 20%;
+  left: 30%;
+  width: 200px;
+  height: 200px;
+  border-top-color: var(--color-secondary);
+  border-left-color: var(--color-secondary);
+  animation: gridPathAnimation 20s infinite ease-in-out;
+  animation-delay: 5s;
+}
+
+/* Add a new path with a different pattern */
+.grid-path-4 {
+  top: 30%;
+  left: 20%;
+  width: 250px;
+  height: 250px;
+  border-right-color: var(--color-accent-warning);
+  border-bottom-color: var(--color-accent-warning);
+  animation: gridPathAnimation 25s infinite ease-in-out;
+  animation-delay: 2s;
+}
+
+/* ——————————————————————————
+   Popover animations
+—————————————————————————— */
+@keyframes popoverIn {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.95) translateX(-50%);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) translateX(-50%);
+  }
+}
+
+@keyframes popoverOut {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1) translateX(-50%);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.95) translateX(-50%);
+  }
+}
+
+.popover-enter {
+  animation: popoverIn 0.2s ease-out forwards;
+}
+
+.popover-exit {
+  animation: popoverOut 0.15s ease-in forwards;
+}
